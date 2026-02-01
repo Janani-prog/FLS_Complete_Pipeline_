@@ -73,7 +73,6 @@ Access at: `http://localhost:5000`
 - **Input**: `.e57` file
 - **Output**: `outputs/<job_id>/<filename>_converted.ply`
 - **Process**: Reads all scans, combines points, preserves colors
-- **Progress**: 0% → 10%
 
 ### Stage 1: Noise Removal
 - **Input**: Raw PLY file (or converted from E57)
@@ -83,7 +82,6 @@ Access at: `http://localhost:5000`
   - Statistical outlier removal (protects interior)
   - DBSCAN clustering (keeps significant clusters)
   - Cylindrical crop (removes external structures)
-- **Progress**: 10% → 40%
 
 ### Stage 2: Alignment
 - **Input**: Noise-removed PLY
@@ -146,23 +144,6 @@ After processing, you'll find these files in `outputs/<job_id>/`:
 
 ---
 
-## Configuration
-
-### Change Reference File
-
-Edit `app.py` line 21:
-```python
-REFERENCE_PLY = Path('reference') / 'your_reference_file.PLY'
-```
-
-### Adjust File Size Limit
-
-Edit `app.py` line 29:
-```python
-app.config['MAX_CONTENT_LENGTH'] = 2048 * 1024 * 1024  # 2GB
-```
-
----
 
 ## Technical Details
 
