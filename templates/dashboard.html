@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ball Mill Analysis Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f8fafc;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: white;
+            border-bottom: 1px solid #e2e8f0;
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            color: #0f3460;
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .user-name {
+            color: #64748b;
+            font-size: 14px;
+        }
+
+        .logout-btn {
+            padding: 8px 16px;
+            background: #e2e8f0;
+            color: #475569;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .logout-btn:hover {
+            background: #cbd5e0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 0 40px;
+        }
+
+        .upload-section {
+            background: white;
+            border-radius: 12px;
+            padding: 48px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            margin-bottom: 40px;
+        }
+
+        .upload-section h2 {
+            color: #0f3460;
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 24px;
+        }
+
+        .upload-area {
+            border: 2px dashed #cbd5e0;
+            border-radius: 12px;
+            padding: 60px 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .upload-area:hover {
+            border-color: #0f3460;
+            background: #f8fafc;
+        }
+
+        .upload-area.dragover {
+            border-color: #0f3460;
+            background: #f0f4f8;
+        }
+
+        .upload-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 20px;
+            color: #94a3b8;
+        }
+
+        .upload-text {
+            color: #475569;
+            font-size: 16px;
+            margin-bottom: 8px;
+        }
+
+        .upload-subtext {
+            color: #94a3b8;
+            font-size: 14px;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .selected-file {
+            margin-top: 20px;
+            padding: 16px;
+            background: #f0f9ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .selected-file-name {
+            color: #0369a1;
+            font-weight: 500;
+        }
+
+        .process-btn {
+            width: 100%;
+            padding: 16px;
+            background: #0f3460;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 24px;
+            display: none;
+        }
+
+        .process-btn:hover {
+            background: #1a4d7a;
+        }
+
+        .process-btn:disabled {
+            background: #cbd5e0;
+            cursor: not-allowed;
+        }
+
+        .progress-section {
+            background: white;
+            border-radius: 12px;
+            padding: 32px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            display: none;
+        }
+
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .progress-stage {
+            color: #0f3460;
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .progress-percent {
+            color: #64748b;
+            font-size: 16px;
+        }
+
+        .progress-bar-container {
+            background: #e2e8f0;
+            border-radius: 8px;
+            height: 12px;
+            overflow: hidden;
+            margin-bottom: 16px;
+        }
+
+        .progress-bar {
+            background: linear-gradient(90deg, #0f3460, #1a4d7a);
+            height: 100%;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .progress-status {
+            color: #64748b;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .results-section {
+            background: white;
+            border-radius: 12px;
+            padding: 32px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            display: none;
+        }
+
+        .results-section h2 {
+            color: #0f3460;
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 24px;
+        }
+
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 24px;
+        }
+
+        .results-table th {
+            background: #f8fafc;
+            color: #475569;
+            font-weight: 600;
+            text-align: left;
+            padding: 12px 16px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        .results-table td {
+            padding: 12px 16px;
+            border-bottom: 1px solid #e2e8f0;
+            color: #1e293b;
+        }
+
+        .results-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .download-buttons {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .download-btn {
+            flex: 1;
+            min-width: 200px;
+            padding: 14px 24px;
+            background: #0f3460;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            text-align: center;
+        }
+
+        .download-btn:hover {
+            background: #1a4d7a;
+        }
+
+        .download-btn.secondary {
+            background: white;
+            color: #0f3460;
+            border: 2px solid #0f3460;
+        }
+
+        .download-btn.secondary:hover {
+            background: #f8fafc;
+        }
+
+        .new-analysis-btn {
+            width: 100%;
+            padding: 14px;
+            background: #e2e8f0;
+            color: #475569;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 24px;
+        }
+
+        .new-analysis-btn:hover {
+            background: #cbd5e0;
+        }
+
+        .error-message {
+            background: #fee;
+            color: #c33;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Ball Mill Analysis System</h1>
+        <div class="user-info">
+            <span class="user-name">{{ user.name }}</span>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="error-message" id="errorMessage"></div>
+
+        <!-- Upload Section -->
+        <div class="upload-section" id="uploadSection">
+            <h2>Upload Point Cloud Scan</h2>
+            <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+                <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <div class="upload-text">Click to upload or drag and drop</div>
+                <div class="upload-subtext">PLY or E57 files (Max 1GB)</div>
+            </div>
+            <input type="file" id="fileInput" accept=".ply,.e57">
+            <div class="selected-file" id="selectedFile">
+                <span class="selected-file-name" id="fileName"></span>
+            </div>
+            <button class="process-btn" id="processBtn">Start Analysis</button>
+        </div>
+
+        <!-- Progress Section -->
+        <div class="progress-section" id="progressSection">
+            <div class="progress-header">
+                <div class="progress-stage" id="progressStage">Initializing...</div>
+                <div class="progress-percent" id="progressPercent">0%</div>
+            </div>
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
+            <div class="progress-status" id="progressStatus">Please wait while we process your scan...</div>
+        </div>
+
+        <!-- Results Section -->
+        <div class="results-section" id="resultsSection">
+            <h2>Analysis Results</h2>
+            <table class="results-table">
+                <thead>
+                    <tr>
+                        <th>Parameter</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody id="resultsTableBody">
+                    <!-- Results will be inserted here -->
+                </tbody>
+            </table>
+            
+            <div class="download-buttons">
+                <a href="#" class="download-btn" id="downloadReport">Download Report (PNG)</a>
+                <a href="#" class="download-btn secondary" id="downloadJSON">Download Data (JSON)</a>
+                <a href="#" class="download-btn secondary" id="downloadAligned">Download Aligned Scan</a>
+            </div>
+            
+            <button class="new-analysis-btn" onclick="resetAnalysis()">Start New Analysis</button>
+        </div>
+    </div>
+
+    <script>
+        let currentFile = null;
+        let currentJobId = null;
+        let statusCheckInterval = null;
+
+        // File upload handling
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileSelect(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileSelect(e.target.files[0]);
+            }
+        });
+
+        function handleFileSelect(file) {
+            const fileName = file.name.toLowerCase();
+            const validExtensions = ['.ply', '.e57'];
+            const hasValidExtension = validExtensions.some(ext => fileName.endsWith(ext));
+            
+            if (!hasValidExtension) {
+                showError('Please select a .ply or .e57 file');
+                return;
+            }
+
+            // Check file size (1GB limit)
+            const maxSize = 1024 * 1024 * 1024; // 1GB in bytes
+            if (file.size > maxSize) {
+                showError(`File is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum size is 1GB.`);
+                return;
+            }
+
+            currentFile = file;
+            const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+            const fileType = fileName.endsWith('.e57') ? 'E57' : 'PLY';
+            document.getElementById('fileName').textContent = `${file.name} (${fileSizeMB} MB - ${fileType})`;
+            document.getElementById('selectedFile').style.display = 'block';
+            document.getElementById('processBtn').style.display = 'block';
+        }
+
+        document.getElementById('processBtn').addEventListener('click', async () => {
+            if (!currentFile) return;
+
+            const formData = new FormData();
+            formData.append('file', currentFile);
+
+            document.getElementById('processBtn').disabled = true;
+            document.getElementById('uploadSection').style.display = 'none';
+            document.getElementById('progressSection').style.display = 'block';
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error('Upload failed');
+                }
+
+                const data = await response.json();
+                currentJobId = data.job_id;
+
+                // Start polling for status
+                startStatusPolling();
+
+            } catch (error) {
+                showError('Failed to upload file: ' + error.message);
+                resetAnalysis();
+            }
+        });
+
+        function startStatusPolling() {
+            statusCheckInterval = setInterval(checkStatus, 2000);
+        }
+
+        async function checkStatus() {
+            if (!currentJobId) return;
+
+            try {
+                const response = await fetch(`/status/${currentJobId}`);
+                const data = await response.json();
+
+                updateProgress(data);
+
+                if (data.status === 'completed') {
+                    clearInterval(statusCheckInterval);
+                    await loadResults();
+                } else if (data.status === 'failed') {
+                    clearInterval(statusCheckInterval);
+                    showError('Processing failed: ' + (data.error || 'Unknown error'));
+                    resetAnalysis();
+                }
+            } catch (error) {
+                console.error('Status check failed:', error);
+            }
+        }
+
+        function updateProgress(data) {
+            document.getElementById('progressStage').textContent = data.stage;
+            document.getElementById('progressPercent').textContent = data.progress + '%';
+            document.getElementById('progressBar').style.width = data.progress + '%';
+        }
+
+        async function loadResults() {
+            try {
+                const response = await fetch(`/results/${currentJobId}`);
+                const data = await response.json();
+
+                displayResults(data.results);
+
+                document.getElementById('progressSection').style.display = 'none';
+                document.getElementById('resultsSection').style.display = 'block';
+
+                // Set download links
+                document.getElementById('downloadReport').href = `/download/${currentJobId}/report`;
+                document.getElementById('downloadJSON').href = `/download/${currentJobId}/json`;
+                document.getElementById('downloadAligned').href = `/download/${currentJobId}/aligned`;
+
+            } catch (error) {
+                showError('Failed to load results: ' + error.message);
+            }
+        }
+
+        function displayResults(results) {
+            const tbody = document.getElementById('resultsTableBody');
+            tbody.innerHTML = '';
+
+            const parameters = [
+                { key: 'effective_diameter_mm', label: 'Effective Diameter (mm)', format: v => v.toFixed(0) },
+                { key: 'effective_length_mm', label: 'Effective Length (mm)', format: v => v.toFixed(0) },
+                { key: 'free_height_mm', label: 'Free Height Over Load (mm)', format: v => v.toFixed(0) },
+                { key: 'total_volume_m3', label: 'Total Internal Volume (m³)', format: v => v.toFixed(1) },
+                { key: 'charge_total_m3', label: 'Total Volume Occupied by Load (m³)', format: v => v.toFixed(1) },
+                { key: 'cylinder_volume_m3', label: 'Internal Volume of Cylinder (m³)', format: v => v.toFixed(1) },
+                { key: 'charge_cylinder_m3', label: 'Volume Occupied in Cylinder (m³)', format: v => v.toFixed(1) },
+                { key: 'total_fill_pct', label: 'Total Mill Filling (%)', format: v => v.toFixed(2) },
+                { key: 'cylinder_fill_pct', label: 'Cylinder Filling (%)', format: v => v.toFixed(2) }
+            ];
+
+            parameters.forEach(param => {
+                const row = tbody.insertRow();
+                row.insertCell(0).textContent = param.label;
+                row.insertCell(1).textContent = param.format(results[param.key]);
+            });
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        function resetAnalysis() {
+            currentFile = null;
+            currentJobId = null;
+            if (statusCheckInterval) {
+                clearInterval(statusCheckInterval);
+                statusCheckInterval = null;
+            }
+
+            document.getElementById('fileInput').value = '';
+            document.getElementById('selectedFile').style.display = 'none';
+            document.getElementById('processBtn').style.display = 'none';
+            document.getElementById('processBtn').disabled = false;
+            document.getElementById('uploadSection').style.display = 'block';
+            document.getElementById('progressSection').style.display = 'none';
+            document.getElementById('resultsSection').style.display = 'none';
+        }
+
+        function logout() {
+            window.location.href = '/logout';
+        }
+    </script>
+</body>
+</html>
