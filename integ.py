@@ -541,59 +541,123 @@ def compute_free_height_improved(points, x_min, x_max, cy, cz, radius):
 # ============================================================================
 
 def get_theoretical_geometry(diameter_mm, length_mm, free_height_mm):
-    """Calculate theoretical volumes based on measured geometry."""
-    D = diameter_mm
-    L = length_mm
-    R = D / 2.0
-    h_free = free_height_mm
-    h_charge = 2*R - h_free
+    """
+    Calculates the EXACT geometric volume of a perfect cylinder segment.
+    Returns separate values for:
+    - Total mill volume (includes cylinder + head volumes via correction)
+    - Cylinder-only volume (straight cylindrical section)
+    """
+    R = diameter_mm / 2.0 / 1000.0  # Convert to meters
+    L = length_mm / 1000.0  # Convert to meters
+    H_charge = (diameter_mm - free_height_mm) / 1000.0  # Height of charge in meters
     
-    # Total volume (cylinder)
-    V_total_m3 = np.pi * (R/1000)**2 * (L/1000)
+    # Cylinder volume (straight cylindrical section only)
+    vol_cyl = np.pi * R**2 * L
     
-    # Cylinder volume (straight section, no heads)
-    V_cylinder_m3 = V_total_m3
-    
-    # Charge volume in cylinder (segment)
-    if h_charge <= 0:
-        V_charge_cyl_m3 = 0.0
-        V_charge_total_m3 = 0.0
-    elif h_charge >= 2*R:
-        V_charge_cyl_m3 = V_cylinder_m3
-        V_charge_total_m3 = V_total_m3
+    # Calculate occupied cross-sectional area (circular segment)
+    if H_charge <= 0:
+        area_occ = 0.0
+    elif H_charge >= 2*R:
+        area_occ = np.pi * R**2
     else:
-        # Circular segment area
-        theta = 2 * np.arccos((R - h_charge) / R)
-        A_segment = (R**2 / 2) * (theta - np.sin(theta))
-        V_charge_cyl_m3 = A_segment * (L/1000) / 1e6
-        V_charge_total_m3 = V_charge_cyl_m3
+        # Circular segment formula
+        val = np.clip((R - H_charge) / R, -1.0, 1.0)
+        term1 = R**2 * np.arccos(val)
+        term2 = (R - H_charge) * np.sqrt(max(0, 2*R*H_charge - H_charge**2))
+        area_occ = term1 - term2
     
-    # Fill percentages
-    total_fill_pct = (V_charge_total_m3 / V_total_m3 * 100) if V_total_m3 > 0 else 0.0
-    cylinder_fill_pct = (V_charge_cyl_m3 / V_cylinder_m3 * 100) if V_cylinder_m3 > 0 else 0.0
+    # Volume occupied in cylinder
+    vol_occ = area_occ * L
     
-    results = {
-        'total_volume_m3': V_total_m3,
-        'cylinder_volume_m3': V_cylinder_m3,
-        'charge_total_m3': V_charge_total_m3,
-        'charge_cylinder_m3': V_charge_cyl_m3,
-        'total_fill_pct': total_fill_pct,
-        'cylinder_fill_pct': cylinder_fill_pct
-    }
-    
-    return results
+    # Return as array for compatibility with legacy prediction model
+    return np.array([vol_cyl, vol_occ])
+
 
 
 # ============================================================================
 # PART 3: PREDICTION MODEL (MOCK - Replace with your actual model)
 # ============================================================================
 
-def predict_single_mill(diameter_mm, length_mm, free_height_mm):
+def predict_single_mill(user_dia, user_len, user_fh):
     """
-    Mock prediction function - replace this with your actual trained model.
-    For now, it just returns the theoretical calculations.
+    Predict mill volumes using Gaussian Process Regression trained on historical data.
+    Returns 6 values: 4 volumes + 2 fill percentages
     """
-    return get_theoretical_geometry(diameter_mm, length_mm, free_height_mm)
+    # Historical training data (diameter, length, free_height)
+    X_train = np.array([
+        [6870, 3795, 5177],
+        [11646, 7657, 8735],
+        [5862, 11681, 3634],
+        [6464, 11335, 3911],
+        [5828, 11677, 3598],
+        [6444, 11332, 3894],
+        [5850, 11678, 3663],
+        [5857, 11681, 3788],
+        [5569, 5886, 4230],
+        [7043, 3803, 5311],
+        [11916, 7668, 8879]
+    ])
+    
+    # Historical ground truth (total_vol, total_occ, cyl_vol, cyl_occ)
+    y_train = np.array([
+        [166.6, 28.2, 140.7, 24.3],
+        [942.1, 163.7, 815.6, 144.4],
+        [337.2, 114.5, 315.3, 108.4],
+        [403.4, 141.7, 371.9, 131.5],
+        [333.2, 110.8, 311.5, 105.6],
+        [400.1, 147.8, 369.6, 136.8],
+        [336.0, 115.2, 313.9, 109.1],
+        [337.0, 105.7, 314.7, 100.5],
+        [146.8, 26.1, 143.4, 25.3],
+        [174, 30.3, 148.2, 26.8],
+        [991.5, 179.7, 855.1, 159.3]
+    ])
+    
+    # Calculate theoretical volumes for training data to get ratios
+    ratios_train = []
+    for i in range(len(X_train)):
+        phys = get_theoretical_geometry(X_train[i,0], X_train[i,1], X_train[i,2])
+        # phys[0] = cylinder volume, phys[1] = occupied volume in cylinder
+        # Ratios: [total/cyl, total_occ/occ, cyl/cyl, cyl_occ/occ]
+        r = [y_train[i,j] / phys[j%2] for j in range(4)]
+        ratios_train.append(r)
+    ratios_train = np.array(ratios_train)
+    
+    # Train 4 separate GP models for each ratio
+    kernel = C(1.0) * RBF(length_scale=[1000, 1000, 500]) + WhiteKernel(noise_level=1e-5)
+    models = []
+    for i in range(4):
+        gpr = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=5, random_state=42)
+        gpr.fit(X_train, ratios_train[:, i])
+        models.append(gpr)
+    
+    # Predict for user input
+    X_user = np.array([[user_dia, user_len, user_fh]])
+    phys_user = get_theoretical_geometry(user_dia, user_len, user_fh)
+    pred_ratios = [m.predict(X_user)[0] for m in models]
+    
+    # Apply predicted ratios to theoretical volumes
+    final_preds = [
+        phys_user[0] * pred_ratios[0],  # Total internal volume
+        phys_user[1] * pred_ratios[1],  # Total volume occupied
+        phys_user[0] * pred_ratios[2],  # Cylinder volume
+        phys_user[1] * pred_ratios[3]   # Cylinder occupied
+    ]
+    
+    # Calculate fill percentages
+    pct_total = (final_preds[1] / final_preds[0]) * 100
+    pct_cyl = (final_preds[3] / final_preds[2]) * 100
+    
+    final_results = {
+        'total_volume_m3': final_preds[0],
+        'charge_total_m3': final_preds[1],
+        'cylinder_volume_m3': final_preds[2],
+        'charge_cylinder_m3': final_preds[3],
+        'total_fill_pct': pct_total,
+        'cylinder_fill_pct': pct_cyl
+    }
+
+    return final_results
 
 
 # ============================================================================
