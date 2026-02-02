@@ -10,6 +10,8 @@ import open3d as o3d
 import numpy as np
 import copy
 from pathlib import Path
+import tkinter as tk
+from tkinter import filedialog
 
 from scipy.optimize import least_squares
 
@@ -419,7 +421,7 @@ def save_point_cloud(pcd, filepath):
 
 
 def select_file(title, filetypes):
-    root = Tk()
+    root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
     filepath = filedialog.askopenfilename(title=title, filetypes=filetypes)
