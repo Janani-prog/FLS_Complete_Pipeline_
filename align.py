@@ -10,8 +10,7 @@ import open3d as o3d
 import numpy as np
 import copy
 from pathlib import Path
-import tkinter as tk
-from tkinter import filedialog
+from tkinter import Tk, filedialog
 
 from scipy.optimize import least_squares
 
@@ -421,7 +420,7 @@ def save_point_cloud(pcd, filepath):
 
 
 def select_file(title, filetypes):
-    root = tk.Tk()
+    root = Tk()
     root.withdraw()
     root.attributes("-topmost", True)
     filepath = filedialog.askopenfilename(title=title, filetypes=filetypes)
@@ -447,6 +446,7 @@ def main():
         aligned_pcd = align_to_reference(ref_pcd, scan_pcd)
 
         out_dir = Path(r"output\aligned_scans")
+        out_dir.mkdir(parents=True, exist_ok=True)
         out_name = f"{Path(scan_path).stem}_aligned.ply"
         save_point_cloud(aligned_pcd, out_dir / out_name)
 
