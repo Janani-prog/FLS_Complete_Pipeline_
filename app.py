@@ -20,9 +20,10 @@ from align import align_to_reference, load_point_cloud as align_load_pc, save_po
 from integ import load_point_cloud, correct_yz_alignment, find_head_planes_trial9, fit_shell_circle_trial9
 from integ import find_head_planes_trial4, fit_shell_circle_trial4, compute_free_height_trial4
 from integ import predict_single_mill, make_plots, get_theoretical_geometry
-from e57_converter import convert_e57_to_ply, check_pye57
+from e57_converter import E57Converter, check_pye57
 
 app = Flask(__name__)
+app.secret_key = 'your-secret-key-change-this-in-production'
 
 # Configuration
 UPLOAD_FOLDER = Path('uploads')
@@ -166,25 +167,21 @@ def process_scan(job_id, input_path, original_filename):
         if file_ext == '.e57':
             job['stage'] = 'E57 Conversion'
             job['progress'] = 5
+            print(f"[{job_id}] E57 to PLY Conversion")
             
-            print(f"\n{'='*60}\nJob {job_id}: E57 to PLY Conversion\n{'='*60}")
+            from e57_converter import E57Converter
+            converter = E57Converter()
+            if not converter.pye57_available:
+                raise Exception("pye57 is not installed. Please install it using 'pip install pye57'")
             
-            # Check if pye57 is available
-            if not check_pye57():
-                raise Exception("pye57 is not installed. Please install it using: pip install pye57")
-            
-            # Convert E57 to PLY
-            converted_path = output_dir / f"{Path(original_filename).stem}_converted.ply"
-            result = convert_e57_to_ply(input_path, converted_path)
-            
+            result = converter.convert(input_path)
             if result is None:
                 raise Exception("E57 to PLY conversion failed")
             
-            # Use converted PLY file for next stages
-            input_path = converted_path
-            job['converted_path'] = str(converted_path)
+            input_path = result  # Update input_path for next stages
+            job['converted_path'] = str(result)
             job['progress'] = 10
-            print(f"E57 converted successfully: {converted_path}")
+            print(f"E57 converted successfully: {result}")
         
         # Stage 1: Noise Removal
         job['stage'] = 'Noise Removal'
