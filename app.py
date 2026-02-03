@@ -18,7 +18,7 @@ import uuid
 from noise_removal import NoiseRemovalProcessor
 from align import align_to_reference, load_point_cloud as align_load_pc, save_point_cloud
 from integ import load_point_cloud, correct_yz_alignment, find_head_planes_trial9, fit_shell_circle_trial9
-from integ import find_head_planes_trial4, fit_shell_circle_trial4, compute_free_height_trial4
+from integ import find_head_planes_trial4, fit_shell_circle_trial4, compute_free_height_improved
 from integ import predict_single_mill, make_plots, get_theoretical_geometry
 from e57_converter import E57Converter, check_pye57
 
@@ -235,7 +235,7 @@ def process_scan(job_id, input_path, original_filename):
         # Free Height Analysis (Trial 4)
         x_min_t4, x_max_t4 = find_head_planes_trial4(points)
         cy_t4, cz_t4, radius_t4 = fit_shell_circle_trial4(points, x_min_t4, x_max_t4)
-        free_height = compute_free_height_trial4(points, x_min_t4, x_max_t4, cy_t4, cz_t4, radius_t4)
+        free_height = compute_free_height_improved(points, x_min_t4, x_max_t4, cy_t4, cz_t4, radius_t4)
         
         job['progress'] = 90 if file_ext == '.e57' else 85
         
