@@ -51,6 +51,11 @@ pip install -r requirements.txt
 reference/Mill body - vale verde - v1 (2).PLY
 ```
 
+Link to Reference file: 
+``` 
+https://drive.google.com/drive/folders/1mHlriZLPhHMk7osbKpSgXgF_dPbC5kWU?usp=sharing
+```
+
 This file is **required** for the alignment stage.
 
 ### 4. Run the Application
