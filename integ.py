@@ -403,10 +403,21 @@ def compute_free_height_improved(points, x_min, x_max, cy, cz, radius):
 
     # Enhanced fallback logic
     if interior_pts < 150:
-        print(f"  → LOW INTERIOR DATA: Using conservative estimate")
-        # When we have low interior data, assume charge is at bottom with high free height
-        # This is typical for scans without bottom plates where charge settled at bottom
-        free_height_mm = radius * 1.30  # 65% of diameter as free height = 35% fill
+        print(f"  → LOW INTERIOR DATA: Using percentile-based estimate")
+        # When we have low interior data, use statistical approach
+        # This is typical for scans without bottom plates or with sparse sampling
+        
+        # Get what interior points we do have
+        if interior_pts > 30:
+            z_p75 = np.percentile(z_int, 75)
+            z_p85 = np.percentile(z_int, 85)
+            # Use conservative estimate (blend of percentiles)
+            surface_z_rel = 0.6 * z_p75 + 0.4 * z_p85
+            free_height_mm = shell_top_z - (cz + surface_z_rel)
+        else:
+            # Very sparse data - use very conservative default
+            free_height_mm = radius * 1.25  # 62.5% of diameter
+        
         z_charge_surface_mm = shell_top_z - free_height_mm
         print(f"    Free height: {free_height_mm:.0f}mm | Charge surface: {z_charge_surface_mm:.0f}mm")
         return free_height_mm
@@ -424,30 +435,62 @@ def compute_free_height_improved(points, x_min, x_max, cy, cz, radius):
     lower_half_pts = np.sum(z_smooth < 0)
     upper_fraction = upper_half_pts / len(z_smooth) if len(z_smooth) > 0 else 0
     
+    # Calculate the vertical spread of interior points
+    z_std = np.std(z_smooth)
+    z_range = np.ptp(z_smooth)
+    z_p10 = np.percentile(z_smooth, 10)
+    z_p90 = np.percentile(z_smooth, 90)
+    
     print(f"  Interior distribution: {lower_half_pts} below center, {upper_half_pts} above center")
     print(f"  Median Z: {z_median_int:.0f}mm, Mean Z: {z_mean_int:.0f}mm")
+    print(f"  Z spread: std={z_std:.0f}mm, range={z_range:.0f}mm, p10={z_p10:.0f}, p90={z_p90:.0f}")
     
-    # CRITICAL: If most interior points are in LOWER half, it's a LOW FILL scenario
-    # In this case, charge is settled at bottom with large free height above
-    is_low_fill = (upper_fraction < 0.4) or (z_median_int < -0.3 * radius)
+    # IMPROVED DETECTION: Multiple criteria for low/high fill
+    # Low fill indicators:
+    # 1. Most points in lower half (upper_fraction < 0.35)
+    # 2. Median significantly below center (< -0.2 * radius)
+    # 3. 90th percentile below center (concentrated at bottom)
+    
+    # Additional check: data quality and distribution uniformity
+    z_quartiles = np.percentile(z_smooth, [25, 50, 75])
+    lower_to_upper_ratio = abs(z_quartiles[0]) / (abs(z_quartiles[2]) + 1e-6)
+    
+    # If there's much more mass in the lower quartile, it's likely low fill
+    is_heavily_weighted_low = lower_to_upper_ratio > 1.5
+    
+    # Check vertical compactness - low fill tends to have charge settled in a smaller Z range
+    z_iqr = z_quartiles[2] - z_quartiles[0]  # Interquartile range
+    is_vertically_compact = z_iqr < 0.6 * radius
+    
+    is_low_fill = ((upper_fraction < 0.35) or 
+                   (z_median_int < -0.2 * radius) or 
+                   (z_p90 < 0.1 * radius) or
+                   (is_heavily_weighted_low and is_vertically_compact))
+    
+    print(f"  Fill detection metrics:")
+    print(f"    Lower/Upper ratio: {lower_to_upper_ratio:.2f}")
+    print(f"    IQR: {z_iqr:.0f}mm ({100*z_iqr/radius:.1f}% of radius)")
+    print(f"    Vertically compact: {is_vertically_compact}")
     
     if is_low_fill:
         print(f"  → DETECTED: LOW FILL scenario (charge at bottom)")
         # For low fill, find the TOP of the charge pile (highest continuous surface)
         # Scan from bottom to top, find the FIRST (lowest) continuous surface that persists
         
-        # Sort z values to scan from bottom to top
-        z_bins = np.linspace(np.min(z_smooth), np.max(z_smooth), 200)
-        dz = 0.010 * radius
+        # Use adaptive binning based on data density
+        n_bins = min(250, max(150, interior_pts // 20))
+        z_bins = np.linspace(np.min(z_smooth), np.max(z_smooth), n_bins)
+        dz = 0.008 * radius  # Slightly tighter slice for better precision
         
         surface_z_rel = None
+        candidate_surfaces = []
         
         # Scan from BOTTOM to TOP
         for i, zb in enumerate(z_bins):
             slice_mask = np.abs(z_smooth - zb) < dz
             n_pts_slice = np.sum(slice_mask)
             
-            if n_pts_slice < 30:
+            if n_pts_slice < 25:
                 continue
             
             y_slice = np.sort(y_int[slice_mask])
@@ -458,41 +501,74 @@ def compute_free_height_improved(points, x_min, x_max, cy, cz, radius):
             
             max_gap = np.max(gaps)
             
-            # For low fill, we want the FIRST continuous surface from bottom
-            # This is the top of the charge pile
-            if max_gap < (0.22 * radius):  # Continuous across mill
+            # For low fill, we want a continuous surface
+            # Adaptive threshold: larger mills need proportionally larger continuity
+            continuity_threshold = 0.20 * radius
+            
+            if max_gap < continuity_threshold:
                 # Check if this is sustained (not just a thin layer)
-                # Look at points within +/- 3*dz of this level
-                sustained_mask = np.abs(z_smooth - zb) < (3 * dz)
+                # Look at points within +/- 4*dz of this level
+                sustained_mask = np.abs(z_smooth - zb) < (4 * dz)
                 n_sustained = np.sum(sustained_mask)
                 
-                if n_sustained > 80:  # Substantial layer
-                    surface_z_rel = zb
-                    print(f"    Found charge surface at Z_rel={zb:.0f}mm (n={n_pts_slice}, gap={max_gap:.0f}mm)")
-                    break  # Take the FIRST (lowest) good surface
+                # Require more substantial layer for reliable detection
+                if n_sustained > max(60, interior_pts * 0.08):
+                    # Store candidate with quality score
+                    quality_score = n_sustained / (max_gap + 1.0)
+                    candidate_surfaces.append((zb, n_pts_slice, max_gap, quality_score))
+        
+        # Select best candidate (highest quality in lower region)
+        if candidate_surfaces:
+            # Sort by position (lowest first)
+            candidate_surfaces.sort(key=lambda x: x[0])
+            
+            # Analyze the distribution of candidates
+            n_candidates = len(candidate_surfaces)
+            print(f"    Found {n_candidates} candidate surfaces")
+            
+            # For low fill, we want the top of the charge pile
+            # This is usually in the MIDDLE of candidates (not too low, not too high)
+            # Or the one with best quality if there's a clear winner
+            
+            # Strategy: Take from middle-to-upper portion of candidates
+            start_idx = max(0, n_candidates // 3)  # Skip bottom third
+            end_idx = max(start_idx + 1, (2 * n_candidates) // 3)  # Take middle third
+            
+            selection_pool = candidate_surfaces[start_idx:end_idx]
+            
+            if not selection_pool:
+                selection_pool = candidate_surfaces
+            
+            # Pick the one with best quality score from this pool
+            best = max(selection_pool, key=lambda x: x[3])
+            surface_z_rel = best[0]
+            print(f"    Selected charge surface at Z_rel={best[0]:.0f}mm (n={best[1]}, gap={best[2]:.0f}mm, quality={best[3]:.2f})")
+            print(f"    Selection: candidate {candidate_surfaces.index(best)+1} of {n_candidates}")
         
         if surface_z_rel is None:
-            # Fallback: use median of interior points
-            surface_z_rel = np.median(z_smooth)
-            print(f"    FALLBACK: Using median interior Z_rel={surface_z_rel:.0f}mm")
+            # Fallback: use 80th percentile (better for low fill than 75th)
+            surface_z_rel = np.percentile(z_smooth, 80)
+            print(f"    FALLBACK: Using 80th percentile Z_rel={surface_z_rel:.0f}mm")
     
     else:
         print(f"  → DETECTED: HIGH FILL scenario (charge fills most of mill)")
         # For high fill, find the HIGHEST continuous surface
         # This is the top of the charge
         
-        z_bins = np.linspace(np.min(z_smooth), np.max(z_smooth), 200)
-        dz = 0.010 * radius
+        n_bins = min(250, max(150, interior_pts // 20))
+        z_bins = np.linspace(np.min(z_smooth), np.max(z_smooth), n_bins)
+        dz = 0.008 * radius
         
         surface_z_rel = None
         best_density = 0
+        candidate_surfaces = []
         
-        # Scan from BOTTOM to TOP, keep track of highest good surface
+        # Scan from BOTTOM to TOP, track all good surfaces
         for i, zb in enumerate(z_bins):
             slice_mask = np.abs(z_smooth - zb) < dz
             n_pts_slice = np.sum(slice_mask)
             
-            if n_pts_slice < 30:
+            if n_pts_slice < 25:
                 continue
             
             y_slice = np.sort(y_int[slice_mask])
@@ -502,20 +578,38 @@ def compute_free_height_improved(points, x_min, x_max, cy, cz, radius):
                 continue
             
             max_gap = np.max(gaps)
-            density = n_pts_slice / (2 * radius * dz * 0.001**2)
+            
+            # Calculate point density
+            y_span = np.ptp(y_slice)
+            density = n_pts_slice / (y_span * dz) if y_span > 0 else 0
             
             # For high fill: surface should span across mill with good density
-            if max_gap < (0.20 * radius) and density > best_density:
-                surface_z_rel = zb
-                best_density = density
-            elif surface_z_rel is not None and max_gap >= 0.20 * radius:
-                # Surface broke - stop scanning upward
-                break
+            continuity_threshold = 0.18 * radius  # Slightly tighter for high fill
+            
+            if max_gap < continuity_threshold:
+                candidate_surfaces.append((zb, n_pts_slice, max_gap, density))
+        
+        # For high fill, take the HIGHEST good surface
+        if candidate_surfaces:
+            # Sort by Z position (highest first)
+            candidate_surfaces.sort(key=lambda x: x[0], reverse=True)
+            
+            # Take the highest one with good quality
+            for surf in candidate_surfaces[:5]:  # Check top 5 candidates
+                zb, n_pts, gap, dens = surf
+                # Verify it's sustained
+                sustained_mask = np.abs(z_smooth - zb) < (4 * dz)
+                n_sustained = np.sum(sustained_mask)
+                
+                if n_sustained > max(60, interior_pts * 0.08):
+                    surface_z_rel = zb
+                    print(f"    Found charge surface at Z_rel={zb:.0f}mm (n={n_pts}, gap={gap:.0f}mm, dens={dens:.2f})")
+                    break
         
         if surface_z_rel is None:
-            # Fallback for high fill: assume 10% free height
-            surface_z_rel = 0.8 * radius
-            print(f"    FALLBACK: Assuming high fill, Z_rel={surface_z_rel:.0f}mm")
+            # Fallback for high fill: use 85th percentile
+            surface_z_rel = np.percentile(z_smooth, 85)
+            print(f"    FALLBACK: Using 85th percentile, Z_rel={surface_z_rel:.0f}mm")
 
     # Convert relative Z to absolute Z
     z_charge_surface_mm = cz + surface_z_rel
@@ -523,9 +617,87 @@ def compute_free_height_improved(points, x_min, x_max, cy, cz, radius):
     # Calculate free height from TOP of shell to charge surface
     free_height_mm = shell_top_z - z_charge_surface_mm
     
-    # Sanity check: free height should be between 5% and 95% of diameter
-    min_free = 0.05 * (2 * radius)
-    max_free = 0.95 * (2 * radius)
+    # ENHANCED SANITY CHECKS with multiple validation strategies
+    min_free = 0.03 * (2 * radius)
+    max_free = 0.97 * (2 * radius)
+    
+    # Calculate multiple percentile-based estimates for comparison
+    z_p75 = np.percentile(z_smooth, 75)
+    z_p80 = np.percentile(z_smooth, 80)
+    z_p85 = np.percentile(z_smooth, 85)
+    z_p90 = np.percentile(z_smooth, 90)
+    z_p95 = np.percentile(z_smooth, 95)
+    
+    expected_free_from_p75 = shell_top_z - (cz + z_p75)
+    expected_free_from_p80 = shell_top_z - (cz + z_p80)
+    expected_free_from_p85 = shell_top_z - (cz + z_p85)
+    expected_free_from_p90 = shell_top_z - (cz + z_p90)
+    
+    print(f"  Percentile-based free height estimates:")
+    print(f"    P75: {expected_free_from_p75:.0f}mm")
+    print(f"    P80: {expected_free_from_p80:.0f}mm")
+    print(f"    P85: {expected_free_from_p85:.0f}mm")
+    print(f"    P90: {expected_free_from_p90:.0f}mm")
+    print(f"    Surface-based: {free_height_mm:.0f}mm")
+    
+    # STRATEGY 1: Check for large discrepancy with P85
+    discrepancy_p85 = abs(free_height_mm - expected_free_from_p85)
+    
+    # STRATEGY 2: Use weighted average of percentiles for robust estimate
+    # Weight towards higher percentiles for better surface detection
+    robust_estimate = (0.15 * expected_free_from_p75 + 
+                      0.20 * expected_free_from_p80 + 
+                      0.30 * expected_free_from_p85 + 
+                      0.25 * expected_free_from_p90 +
+                      0.10 * free_height_mm)
+    
+    # STRATEGY 3: Check if surface detection seems unreliable
+    # If free height is much larger than most estimates, it's probably wrong
+    avg_percentile_estimate = (expected_free_from_p80 + expected_free_from_p85 + expected_free_from_p90) / 3.0
+    
+    correction_threshold = 0.25 * radius  # About 12.5% of diameter
+    
+    # Decision logic
+    needs_correction = False
+    correction_weight = 0.0
+    
+    if discrepancy_p85 > correction_threshold:
+        print(f"  ⚠ Large discrepancy with P85: {discrepancy_p85:.0f}mm")
+        needs_correction = True
+        
+        # Calculate how much to trust percentiles vs surface detection
+        # Larger discrepancy = trust percentiles more
+        if discrepancy_p85 > 0.4 * radius:
+            correction_weight = 0.85  # Trust percentiles heavily
+        elif discrepancy_p85 > 0.3 * radius:
+            correction_weight = 0.70
+        else:
+            correction_weight = 0.50
+    
+    # Additional check: if our estimate is an outlier compared to percentile range
+    percentile_spread = expected_free_from_p90 - expected_free_from_p75
+    if abs(free_height_mm - avg_percentile_estimate) > percentile_spread:
+        print(f"  ⚠ Surface estimate is outlier from percentile range")
+        needs_correction = True
+        correction_weight = max(correction_weight, 0.75)
+    
+    if needs_correction:
+        print(f"  → Applying correction (weight={correction_weight:.2f})")
+        print(f"    Original: {free_height_mm:.0f}mm")
+        
+        # Use blended estimate
+        if is_low_fill:
+            # For low fill: strongly favor P80 (captures top of pile better)
+            corrected_free = correction_weight * expected_free_from_p80 + (1 - correction_weight) * free_height_mm
+        else:
+            # For high fill: use robust weighted estimate
+            corrected_free = correction_weight * robust_estimate + (1 - correction_weight) * free_height_mm
+        
+        free_height_mm = corrected_free
+        z_charge_surface_mm = shell_top_z - free_height_mm
+        print(f"    Corrected: {free_height_mm:.0f}mm")
+    
+    # Final bounds check
     free_height_mm = np.clip(free_height_mm, min_free, max_free)
 
     print(f"  → FINAL RESULT:")
